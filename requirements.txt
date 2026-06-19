@@ -1,5 +1,4 @@
 openai
-anthropic
 pillow
 pymupdf
 pytesseract
@@ -7,3 +6,4 @@ python-dotenv
 requests
 fpdf2
 matplotlib
+google-genai
