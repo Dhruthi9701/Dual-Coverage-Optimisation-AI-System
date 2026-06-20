@@ -154,28 +154,47 @@ def extract_pt_invoice(path: Path) -> dict:
 
     prompt = """You are a medical billing assistant with expert knowledge of CPT codes.
 Extract the following from this physical therapy invoice image and return ONLY a JSON object, no extra text.
-IMPORTANT: The invoice does NOT list CPT codes. You must infer them from the service descriptions.
-Only list services that are literally printed on the invoice — do not add common PT services
-that aren't shown. CPT/ICD code inference for the services that ARE present is fine and expected;
-inventing extra services is not.
-For example:
-  "Physical Therapy Evaluation" maps to CPT 97161
-  "Therapeutic Exercise" maps to CPT 97110
-  "Manual Therapy" maps to CPT 97140
-  "Neuromuscular Re-education" maps to CPT 97112
+IMPORTANT: The invoice does NOT list CPT codes. You must infer them per LINE ITEM from each
+service description, using your clinical/billing knowledge. Only list line items that are
+literally printed on the invoice with their actual date and amount — do not add or invent rows.
+Reference mappings (apply the closest match per line, not just these four):
+  "Physical Therapy Evaluation" -> CPT 97161
+  "Therapeutic Exercise" -> CPT 97110
+  "Manual Therapy" / "Spinal Mobilisation" -> CPT 97140
+  "Neuromuscular Re-education" -> CPT 97112
+  "Heat Therapy" / "hot or cold packs" -> CPT 97010
+  "Dry Needling" -> CPT 20560
+  "Flexibility / Posture / Advanced Progression / Home Programme" -> CPT 97110 (therapeutic exercise variant)
+Also capture any referring doctor, clinic address, GST/invoice number, and billing-admin
+handwritten notes that are visible — these are real fields on the document, extract them
+if present rather than leaving them out.
 
-Return:
+Return ONLY this JSON:
 {
   "patient_name": "<name>",
+  "patient_age_gender": "<as printed, e.g. '31 Years / Female'>",
   "clinic_name": "<clinic>",
+  "clinic_address": "<address if visible, else empty string>",
+  "invoice_no": "<invoice number if visible>",
   "invoice_date": "<date>",
+  "referring_doctor": "<name + title if printed on the invoice, else empty string>",
   "diagnosis_mentioned": "<diagnosis>",
-  "services": ["<service description>", "..."],
-  "inferred_cpt_codes": ["<CPT code: description>", "..."],
+  "line_items": [
+    {
+      "date": "<DD-Mon-YY as printed>",
+      "description": "<exact service description printed>",
+      "amount_inr": <number>,
+      "inferred_cpt_code": "<best-matching CPT code>",
+      "inferred_cpt_description": "<short CPT description>"
+    }
+  ],
   "inferred_icd10_codes": ["<ICD-10 code: description>"],
+  "subtotal_inr": <number, if shown separately>,
+  "gst_inr": <number, if shown, else 0>,
   "total_amount_inr": <number>,
-  "payment_status": "<paid/unpaid>",
-  "cpt_inference_note": "Codes inferred by agent as invoice did not list them explicitly"
+  "payment_status": "<paid/unpaid, as printed>",
+  "billing_admin_notes": ["<any handwritten/note line, verbatim>"],
+  "cpt_inference_note": "Codes inferred per line item by agent as invoice did not list them explicitly"
 }"""
 
     result = ask_gemini(
@@ -319,6 +338,7 @@ def validate_extracted_state(state: dict) -> list[str]:
     Check that all required fields were successfully extracted.
     Returns a list of missing/invalid fields.
     """
+    import re as _re
     issues = []
 
     # Check MRI
@@ -330,15 +350,32 @@ def validate_extracted_state(state: dict) -> list[str]:
 
     # Check PT invoice
     pt = state.get("pt_invoice", {})
-    if not pt.get("inferred_cpt_codes"):
-        issues.append("pt_invoice.inferred_cpt_codes — agent failed to infer CPT codes")
+    line_items = pt.get("line_items", [])
+    if not line_items:
+        issues.append("pt_invoice.line_items — agent failed to extract/infer any line items")
+    elif any(not li.get("inferred_cpt_code") for li in line_items):
+        issues.append("pt_invoice.line_items — one or more rows missing an inferred CPT code")
     if not pt.get("total_amount_inr"):
         issues.append("pt_invoice.total_amount_inr is missing")
 
-    # Check surgeon estimate
+    # Check surgeon estimate — also validate CPT code format
     surg = state.get("surgeon_estimate", {})
-    if not surg.get("procedures"):
+    procedures = surg.get("procedures", [])
+    if not procedures:
         issues.append("surgeon_estimate.procedures is missing")
+    else:
+        # Warn (non-fatal) if any CPT code is malformed (e.g. "CPT00400" instead of "CPT 00400")
+        # The COB engine handles this at runtime, but log it for traceability
+        malformed = [
+            p.get("cpt_code") for p in procedures
+            if p.get("cpt_code") and p["cpt_code"] not in ("IMPLANTS",)
+            and not _re.match(r"^(CPT\s*)?\d{5}$|^IMPLANTS$", str(p.get("cpt_code", "")).strip())
+        ]
+        if malformed:
+            issues.append(
+                f"surgeon_estimate.procedures — malformed CPT token(s) detected: {malformed}. "
+                "COB engine will normalise these; verify source image."
+            )
     if not surg.get("total_surgical_amount_inr"):
         issues.append("surgeon_estimate.total_surgical_amount_inr is missing")
 
@@ -348,6 +385,43 @@ def validate_extracted_state(state: dict) -> list[str]:
         issues.append("user_query.insurers_mentioned is missing")
 
     return issues
+
+
+# ─────────────────────────────────────────────────────────────
+# RETRY LOOP
+# ─────────────────────────────────────────────────────────────
+
+# Maps a validation-issue prefix to the extractor that can fix it,
+# and where in `state` + which input file to re-run it against.
+_ISSUE_TO_EXTRACTOR = {
+    "mri_report":     (extract_mri_report,       DATA_DIR / "aarav_mri_report.pdf"),
+    "pt_invoice":      (extract_pt_invoice,        DATA_DIR / "priya_pt_invoice.png"),
+    "surgeon_estimate": (extract_surgeon_estimate, DATA_DIR / "surgeon_estimate.jpg"),
+    "user_query":      (extract_user_query,        DATA_DIR / "user_query.txt"),
+}
+
+
+def retry_failed_extractions(state: dict, issues: list[str], max_retries: int = 1) -> dict:
+    """
+    Agentic self-correction loop.
+    For each distinct top-level field a validation issue points at, re-run
+    that field's extractor (LLM call repeated, not just re-read from cache)
+    up to `max_retries` times. This is what turns "validation" from a
+    reporting step into an actual closed loop: detect -> retry -> re-check.
+    """
+    broken_keys = {issue.split(".")[0] for issue in issues if "." in issue}
+    for key in broken_keys:
+        extractor, path = _ISSUE_TO_EXTRACTOR.get(key, (None, None))
+        if not extractor:
+            continue
+        for attempt in range(1, max_retries + 1):
+            print(f"  [RETRY] Re-running extractor for '{key}' (attempt {attempt}/{max_retries})...")
+            try:
+                state[key] = extractor(path)
+            except Exception as e:
+                print(f"  [RETRY] '{key}' extractor raised {type(e).__name__}: {e}")
+                continue
+    return state
 
 
 # ─────────────────────────────────────────────────────────────
@@ -380,8 +454,22 @@ def run_intake_agent():
         print(f"  [VALIDATE] WARNING — {len(issues)} issue(s) found:")
         for issue in issues:
             print(f"    - {issue}")
-        state["validation_status"] = "INCOMPLETE"
-        state["validation_issues"] = issues
+
+        # --- Agentic self-correction: retry the specific broken extractors ---
+        state = retry_failed_extractions(state, issues, max_retries=1)
+
+        print("\n  [VALIDATE] Re-checking after retry...")
+        issues = validate_extracted_state(state)
+        if issues:
+            print(f"  [VALIDATE] STILL {len(issues)} issue(s) after retry:")
+            for issue in issues:
+                print(f"    - {issue}")
+            state["validation_status"] = "INCOMPLETE"
+            state["validation_issues"] = issues
+        else:
+            print("  [VALIDATE] All issues resolved after retry.")
+            state["validation_status"] = "COMPLETE"
+            state["validation_issues"] = []
     else:
         print("  [VALIDATE] All required fields extracted successfully.")
         state["validation_status"] = "COMPLETE"

@@ -76,8 +76,12 @@ _PLAN_DB = {
         "out_of_pocket_max_inr":    100000.0,
         "out_of_pocket_met_inr":    10000.0,
         "covered_cpt_codes":        [
+            # Surgical
             "29888", "29881", "00400",
+            # Physical therapy
             "97161", "97110", "97140", "97112", "97530",
+            "97010",   # Hot/cold packs (heat therapy)
+            "20560",   # Dry needling (single muscle)
         ],
         "pre_auth_required_cpts":   ["29888", "29881"],
         "network_status":           "in-network",
@@ -95,8 +99,12 @@ _PLAN_DB = {
         "out_of_pocket_max_inr":    75000.0,
         "out_of_pocket_met_inr":    15000.0,
         "covered_cpt_codes":        [
+            # Surgical
             "29888", "29881", "00400",
+            # Physical therapy
             "97161", "97110", "97140", "97112", "97530",
+            "97010",   # Hot/cold packs (heat therapy)
+            "20560",   # Dry needling (single muscle)
         ],
         "pre_auth_required_cpts":   ["29888", "29881"],
         "network_status":           "in-network",
