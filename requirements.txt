@@ -3,3 +3,4 @@ pymupdf
 fpdf2
 matplotlib
 Pillow
+pyttsx3
