@@ -104,27 +104,44 @@ def generate_aarav_preauth(state):
     pdf.ln(3)
 
     pdf.section_title("1. PATIENT & POLICY DETAILS")
+    # Extract patient details dynamically from state
+    mri_patient = mri.get("patient_name", "Aarav Sen")
+    mri_age = mri.get("patient_age", "34")
+    primary_plan = state.get("plan_details", {}).get(cob.get("primary_insurer", "Insurer2_PlanB"), {})
+    secondary_plan = state.get("plan_details", {}).get(cob.get("secondary_insurer", "Insurer1_PlanA"), {})
+    primary_policy_no = primary_plan.get("policy_number", "PLB-2024-AS-00441")
+    secondary_subscriber = secondary_plan.get("subscriber_name", "Priya Sen")
+    
     for k, v in [
-        ("Patient:", "Mr. Aarav Sen"),
-        ("DOB:", "12-Mar-1990  (Age: 34)"),
-        ("Policy No:", "PLB-2024-AS-00441"),
+        ("Patient:", f"Mr. {mri_patient}"),
+        ("DOB:", f"12-Mar-1990  (Age: {mri_age})"),
+        ("Policy No:", primary_policy_no),
         ("Plan:", "Plan B -- Insurer2  (Primary Policyholder)"),
-        ("Secondary:", "Plan A -- Insurer1  (Dependent under Priya Sen)"),
+        ("Secondary:", f"Plan A -- Insurer1  (Dependent under {secondary_subscriber})"),
         ("Employer:", "TechCorp India Pvt. Ltd., Mumbai"),
     ]:
         pdf.kv(k, v)
+
     pdf.ln(2)
 
     pdf.section_title("2. CLINICAL JUSTIFICATION")
     diag = mri.get("primary_diagnosis", "Complete ACL tear, Right Knee")
+    # Extract ICD codes dynamically from surgeon estimate procedures
+    procedures = surg.get("procedures", [])
+    icd_codes = [p.get("icd10_code") for p in procedures if p.get("icd10_code")]
+    primary_icd = icd_codes[0] if len(icd_codes) > 0 else "S83.511A"
+    secondary_icd = icd_codes[1] if len(icd_codes) > 1 else "S83.211A"
+    mri_date = mri.get("study_date", "12-May-2024")
+    
     for k, v in [
         ("Primary Dx:", diag[:70]),
-        ("ICD-10:", "S83.511A -- ACL tear, right knee"),
+        ("ICD-10:", f"{primary_icd} -- ACL tear, right knee"),
         ("Secondary Dx:", "Medial Meniscus Tear, Posterior Horn"),
-        ("ICD-10:", "S83.211A -- Meniscus tear, right knee"),
-        ("MRI Ref:", "RAD-2024-08821 | HealthScan Diagnostics | 12-May-2024"),
+        ("ICD-10:", f"{secondary_icd} -- Meniscus tear, right knee"),
+        ("MRI Ref:", f"RAD-2024-08821 | HealthScan Diagnostics | {mri_date}"),
     ]:
         pdf.kv(k, v)
+
     pdf.ln(2)
     pdf.body(
         "MRI confirms complete mid-substance ACL tear with pivot-shift bone contusions and "
@@ -164,13 +181,17 @@ def generate_aarav_preauth(state):
     pdf.ln(3)
 
     pdf.section_title("4. TREATING PHYSICIAN & FACILITY")
+    surgeon_name = surg.get("surgeon_name", "Dr. Kiran Rao")
+    hospital_name = surg.get("hospital_name", "Apollo Orthopaedic & Sports Medicine Centre")
+    
     for k, v in [
-        ("Surgeon:", "Dr. Kiran Rao, MS Ortho, Fellowship Sports Medicine"),
-        ("Facility:", "Apollo Orthopaedic & Sports Medicine Centre, Navi Mumbai"),
+        ("Surgeon:", f"{surgeon_name}, MS Ortho, Fellowship Sports Medicine"),
+        ("Facility:", f"{hospital_name}, Navi Mumbai"),
         ("Proposed Date:", "Within 30 days of pre-auth approval"),
         ("Expected Stay:", "2 days"),
     ]:
         pdf.kv(k, v)
+
     pdf.ln(2)
 
     pdf.section_title("5. DUAL COVERAGE -- COB NOTICE")
