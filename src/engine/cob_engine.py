@@ -40,7 +40,8 @@ def fetch_plan_details(plan_key: str, cpt_codes: list) -> dict:
 # COB RULE ENGINE
 # ─────────────────────────────────────────────────────────────
 
-def determine_primary_insurer(patient: str, claim_type: str) -> tuple[str, str, str]:
+def determine_primary_insurer(patient: str, claim_type: str, plan_a: dict, plan_b: dict) -> tuple[str, str, str]:
+
     """
     Coordination of Benefits Rule — Subscriber Rule (standard for dual
     corporate-policy COB in India): whichever plan you are the *named
@@ -64,23 +65,37 @@ def determine_primary_insurer(patient: str, claim_type: str) -> tuple[str, str, 
     """
     print(f"  [COB] Determining primary insurer for {patient} — {claim_type}...")
 
-    if patient == "Aarav":
-        primary   = "Insurer2_PlanB"
+    # Extract subscriber names from the passed plan dictionaries
+    plan_a_subscriber = plan_a.get("subscriber_name", "")
+    plan_b_subscriber = plan_b.get("subscriber_name", "")
+
+    # Determine which plan the patient is the primary policyholder on
+    # Determine which plan the patient is the primary policyholder on (using partial match)
+    if patient in plan_b_subscriber:
+        primary = "Insurer2_PlanB"
         secondary = "Insurer1_PlanA"
         reasoning = (
-            "Aarav is the Primary Policyholder on Plan B (Insurer2), "
-            "so Plan B is PRIMARY for his own claims. "
-            "On Plan A (Insurer1), Aarav is a Dependent under Priya's policy, "
-            "so Plan A is SECONDARY."
+            f"{patient} is the Primary Policyholder on Plan B (Insurer2), "
+            f"so Plan B is PRIMARY for their own claims. "
+            f"On Plan A (Insurer1), {patient} is a Dependent under {plan_a_subscriber}'s policy, "
+            f"so Plan A is SECONDARY."
         )
-    else:  # Priya
-        primary   = "Insurer1_PlanA"
+    elif patient in plan_a_subscriber:
+        primary = "Insurer1_PlanA"
         secondary = "Insurer2_PlanB"
         reasoning = (
-            "Priya is the Primary Policyholder on Plan A (Insurer1), "
-            "so Plan A is PRIMARY for her own claims. "
-            "On Plan B (Insurer2), Priya is a Dependent under Aarav's policy, "
-            "so Plan B is SECONDARY."
+            f"{patient} is the Primary Policyholder on Plan A (Insurer1), "
+            f"so Plan A is PRIMARY for their own claims. "
+            f"On Plan B (Insurer2), {patient} is a Dependent under {plan_b_subscriber}'s policy, "
+            f"so Plan B is SECONDARY."
+        )
+    else:
+        # Fallback: if patient name doesn't match any subscriber, default to first available plan
+        primary = "Insurer1_PlanA"
+        secondary = "Insurer2_PlanB"
+        reasoning = (
+            f"Unable to determine subscriber relationship for {patient}. "
+            f"Defaulting to Plan A as PRIMARY."
         )
 
     print(f"  [COB] PRIMARY  → {primary}")
@@ -327,12 +342,17 @@ def run_cob_engine():
     # ─────────────────────────────────────────
     print("\n  ── CLAIM 1: Aarav's ACL Surgery ──")
     aarav_primary_key, aarav_secondary_key, aarav_cob_reason = determine_primary_insurer(
-        "Aarav", "ACL Surgery"
+        "Aarav", "ACL Surgery", plan_a, plan_b
     )
+
+
     aarav_primary_plan   = plan_b if aarav_primary_key   == "Insurer2_PlanB" else plan_a
     aarav_secondary_plan = plan_a if aarav_secondary_key == "Insurer1_PlanA" else plan_b
 
-    aarav_total = state["surgeon_estimate"].get("total_surgical_amount_inr", 450000)
+    aarav_total = state["surgeon_estimate"].get("total_surgical_amount_inr")
+    if not aarav_total:
+        raise ValueError("Missing total surgical amount from surgeon estimate")
+
     aarav_cob   = calculate_cob_payment(aarav_total, aarav_primary_plan, aarav_secondary_plan, "Aarav")
     aarav_math  = audit_cob_math(aarav_cob)
     print(f"  [AUDIT] Math check: {aarav_math['note']}")
@@ -354,12 +374,17 @@ def run_cob_engine():
     # ─────────────────────────────────────────
     print("\n  ── CLAIM 2: Priya's PT Bills ──")
     priya_primary_key, priya_secondary_key, priya_cob_reason = determine_primary_insurer(
-        "Priya", "Physical Therapy"
+        "Priya", "Physical Therapy", plan_a, plan_b
     )
+
+
     priya_primary_plan   = plan_a if priya_primary_key   == "Insurer1_PlanA" else plan_b
     priya_secondary_plan = plan_b if priya_secondary_key == "Insurer2_PlanB" else plan_a
 
-    priya_total = state["pt_invoice"].get("total_amount_inr", 30000)
+    priya_total = state["pt_invoice"].get("total_amount_inr")
+    if not priya_total:
+        raise ValueError("Missing total amount from PT invoice")
+
     priya_cob   = calculate_cob_payment(priya_total, priya_primary_plan, priya_secondary_plan, "Priya")
     priya_math  = audit_cob_math(priya_cob)
     print(f"  [AUDIT] Math check: {priya_math['note']}")

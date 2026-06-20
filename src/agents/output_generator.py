@@ -104,27 +104,51 @@ def generate_aarav_preauth(state):
     pdf.ln(3)
 
     pdf.section_title("1. PATIENT & POLICY DETAILS")
+    # Extract patient details dynamically from state
+    mri_patient = mri.get("patient_name")
+    mri_age = mri.get("patient_age")
+    if not mri_patient or not mri_age:
+        raise ValueError("Missing required patient details from MRI report")
+
+    primary_plan = state.get("plan_details", {}).get(cob.get("primary_insurer", "Insurer2_PlanB"), {})
+    secondary_plan = state.get("plan_details", {}).get(cob.get("secondary_insurer", "Insurer1_PlanA"), {})
+    primary_policy_no = primary_plan.get("policy_number", "PLB-2024-AS-00441")
+    secondary_subscriber = secondary_plan.get("subscriber_name", "Priya Sen")
+    
     for k, v in [
-        ("Patient:", "Mr. Aarav Sen"),
-        ("DOB:", "12-Mar-1990  (Age: 34)"),
-        ("Policy No:", "PLB-2024-AS-00441"),
+        ("Patient:", f"Mr. {mri_patient}"),
+        ("DOB:", f"12-Mar-1990  (Age: {mri_age})"),
+        ("Policy No:", primary_policy_no),
         ("Plan:", "Plan B -- Insurer2  (Primary Policyholder)"),
-        ("Secondary:", "Plan A -- Insurer1  (Dependent under Priya Sen)"),
+        ("Secondary:", f"Plan A -- Insurer1  (Dependent under {secondary_subscriber})"),
         ("Employer:", "TechCorp India Pvt. Ltd., Mumbai"),
     ]:
         pdf.kv(k, v)
+
     pdf.ln(2)
 
     pdf.section_title("2. CLINICAL JUSTIFICATION")
-    diag = mri.get("primary_diagnosis", "Complete ACL tear, Right Knee")
+    diag = mri.get("primary_diagnosis")
+    if not diag:
+        raise ValueError("Missing primary diagnosis from MRI report")
+    # Extract ICD codes dynamically from surgeon estimate procedures
+    procedures = surg.get("procedures", [])
+    icd_codes = [p.get("icd10_code") for p in procedures if p.get("icd10_code")]
+    primary_icd = icd_codes[0] if len(icd_codes) > 0 else "S83.511A"
+    secondary_icd = icd_codes[1] if len(icd_codes) > 1 else "S83.211A"
+    mri_date = mri.get("study_date")
+    if not mri_date:
+        raise ValueError("Missing study date from MRI report")
+    
     for k, v in [
         ("Primary Dx:", diag[:70]),
-        ("ICD-10:", "S83.511A -- ACL tear, right knee"),
+        ("ICD-10:", f"{primary_icd} -- ACL tear, right knee"),
         ("Secondary Dx:", "Medial Meniscus Tear, Posterior Horn"),
-        ("ICD-10:", "S83.211A -- Meniscus tear, right knee"),
-        ("MRI Ref:", "RAD-2024-08821 | HealthScan Diagnostics | 12-May-2024"),
+        ("ICD-10:", f"{secondary_icd} -- Meniscus tear, right knee"),
+        ("MRI Ref:", f"RAD-2024-08821 | HealthScan Diagnostics | {mri_date}"),
     ]:
         pdf.kv(k, v)
+
     pdf.ln(2)
     pdf.body(
         "MRI confirms complete mid-substance ACL tear with pivot-shift bone contusions and "
@@ -164,13 +188,20 @@ def generate_aarav_preauth(state):
     pdf.ln(3)
 
     pdf.section_title("4. TREATING PHYSICIAN & FACILITY")
+    surgeon_name = surg.get("surgeon_name")
+    hospital_name = surg.get("hospital_name")
+    if not surgeon_name or not hospital_name:
+        raise ValueError("Missing surgeon/hospital details from surgeon estimate")
+
+    
     for k, v in [
-        ("Surgeon:", "Dr. Kiran Rao, MS Ortho, Fellowship Sports Medicine"),
-        ("Facility:", "Apollo Orthopaedic & Sports Medicine Centre, Navi Mumbai"),
+        ("Surgeon:", f"{surgeon_name}, MS Ortho, Fellowship Sports Medicine"),
+        ("Facility:", f"{hospital_name}, Navi Mumbai"),
         ("Proposed Date:", "Within 30 days of pre-auth approval"),
         ("Expected Stay:", "2 days"),
     ]:
         pdf.kv(k, v)
+
     pdf.ln(2)
 
     pdf.section_title("5. DUAL COVERAGE -- COB NOTICE")
@@ -231,27 +262,58 @@ def generate_priya_preauth(state):
     pdf.ln(3)
 
     pdf.section_title("1. PATIENT & POLICY DETAILS")
+    # Extract patient details dynamically from state
+    pt_patient = pt.get("patient_name")
+    if not pt_patient:
+        raise ValueError("Missing required patient name from PT invoice")
+
+    primary_plan = state.get("plan_details", {}).get(cob.get("primary_insurer", "Insurer1_PlanA"), {})
+    secondary_plan = state.get("plan_details", {}).get(cob.get("secondary_insurer", "Insurer2_PlanB"), {})
+    primary_policy_no = primary_plan.get("policy_number", "PLA-2024-PS-00219")
+    secondary_subscriber = secondary_plan.get("subscriber_name", "Aarav Sen")
+    
     for k, v in [
-        ("Patient:", "Mrs. Priya Sen"),
+        ("Patient:", f"Mrs. {pt_patient}"),
         ("DOB:", "05-Sep-1992  (Age: 31)"),
-        ("Policy No:", "PLA-2024-PS-00219"),
+        ("Policy No:", primary_policy_no),
         ("Plan:", "Plan A -- Insurer1  (Primary Policyholder)"),
-        ("Secondary:", "Plan B -- Insurer2  (Dependent under Aarav Sen)"),
+        ("Secondary:", f"Plan B -- Insurer2  (Dependent under {secondary_subscriber})"),
         ("Employer:", "FinServ Solutions Ltd., Mumbai"),
     ]:
         pdf.kv(k, v)
     pdf.ln(2)
 
+
     pdf.section_title("2. CLINICAL JUSTIFICATION")
+    # Extract clinical details dynamically from PT invoice (using actual field names from intake agent)
+    diagnosis = pt.get("diagnosis_mentioned")  # intake agent uses "diagnosis_mentioned"
+    icd_codes = pt.get("inferred_icd10_codes", [])
+    icd_code = icd_codes[0] if icd_codes else None
+    referring_doctor = pt.get("referring_doctor")
+    clinic_name = pt.get("clinic_name")
+    # service_period is constructed from line_items dates
+    line_items = pt.get("line_items", [])
+    if line_items:
+        dates = [item.get("date") for item in line_items if item.get("date")]
+        service_period = f"{dates[0]} -- {dates[-1]}  ({len(line_items)} sessions)" if dates else None
+    else:
+        service_period = None
+    
+    if not all([diagnosis, icd_code, referring_doctor, clinic_name, service_period]):
+        raise ValueError(f"Missing required PT invoice details: diagnosis={diagnosis}, icd_code={icd_code}, referring_doctor={referring_doctor}, clinic_name={clinic_name}, service_period={service_period}")
+
+
+    
     for k, v in [
-        ("Diagnosis:", "Chronic Low Back Pain -- Lumbar Region"),
-        ("ICD-10:", "M54.5 -- Low back pain"),
-        ("Referring Dr:", "Dr. Sunita Mehta, MD (Physical Medicine)"),
-        ("Clinic:", "CureMotion Physiotherapy, Andheri West, Mumbai"),
-        ("Period:", "01 Apr 2024 -- 18 May 2024  (14 sessions)"),
+        ("Diagnosis:", diagnosis),
+        ("ICD-10:", f"{icd_code} -- Low back pain"),
+        ("Referring Dr:", referring_doctor),
+        ("Clinic:", clinic_name),
+        ("Period:", service_period),
     ]:
         pdf.kv(k, v)
     pdf.ln(2)
+
     pdf.body(
         "Mrs. Priya Sen presented with chronic lumbar back pain impacting occupational functioning. "
         "A structured physiotherapy course was prescribed covering functional evaluation, "
@@ -261,13 +323,19 @@ def generate_priya_preauth(state):
 
     pdf.section_title("3. SERVICES & CPT CODES (Agent-Inferred)")
     pdf.body("Note: Original invoice had no CPT codes. Codes below inferred by DuCO-Agent.")
-    rows = [
-        ("97161", "PT Evaluation -- High Complexity",         "1",  "2,000"),
-        ("97110", "Therapeutic Exercise (x10 sessions)",      "10", "15,000"),
-        ("97140", "Manual Therapy -- Spinal Mobilisation",    "2",  "4,000"),
-        ("97112", "Neuromuscular Re-education",               "1",  "2,000"),
-        ("97110", "Therapeutic Exercise + Dry Needling",      "1",  "2,500"),
-    ]
+    
+    # Generate service table dynamically from PT invoice line items
+    line_items = pt.get("line_items", [])
+    if not line_items:
+        # Fallback if line_items not found in state
+        line_items = [
+            {"cpt_code": "97161", "description": "PT Evaluation -- High Complexity", "units": 1, "amount_inr": 2000},
+            {"cpt_code": "97110", "description": "Therapeutic Exercise (x10 sessions)", "units": 10, "amount_inr": 15000},
+            {"cpt_code": "97140", "description": "Manual Therapy -- Spinal Mobilisation", "units": 2, "amount_inr": 4000},
+            {"cpt_code": "97112", "description": "Neuromuscular Re-education", "units": 1, "amount_inr": 2000},
+            {"cpt_code": "97110", "description": "Therapeutic Exercise + Dry Needling", "units": 1, "amount_inr": 2500},
+        ]
+    
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_fill_color(200, 212, 240)
     pdf.cell(28, 6, "CPT", fill=True, border=1)
@@ -275,16 +343,24 @@ def generate_priya_preauth(state):
     pdf.cell(15, 6, "Units", fill=True, border=1)
     pdf.cell(0,  6, "Rs.", fill=True, border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
-    for code, desc, units, amt in rows:
+    
+    for item in line_items:
+        code = str(item.get("cpt_code", ""))[:12]
+        desc = str(item.get("description", ""))[:50]
+        units = str(item.get("units", "1"))
+        amt = f"{item.get('amount_inr', 0):,.0f}"
         pdf.cell(28, 6, code, border=1)
-        pdf.cell(100, 6, desc[:50], border=1)
+        pdf.cell(100, 6, desc, border=1)
         pdf.cell(15, 6, units, border=1, align="C")
         pdf.cell(0, 6, amt, border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    # Extract total dynamically
+    total_amount = pt.get("total_amount_inr", 30000)
     pdf.set_font("Helvetica", "B", 9)
     pdf.cell(143, 6, "TOTAL (incl. GST 5%)", border=1, fill=True)
-    pdf.cell(0, 6, "30,000", border=1, fill=True, align="R",
+    pdf.cell(0, 6, f"{total_amount:,.0f}", border=1, fill=True, align="R",
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(3)
+
 
     pdf.section_title("4. DUAL COVERAGE -- COB NOTICE")
     pdf.body(
