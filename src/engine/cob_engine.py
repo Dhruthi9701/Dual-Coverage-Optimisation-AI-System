@@ -5,58 +5,35 @@ Reads data/state.json (output of intake agent), determines primary vs secondary
 insurer for each patient, calculates exact INR payments, and saves updated state.
 """
 
+import sys
 import json
 from pathlib import Path
+
+# Make src/ importable when running this file directly
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from src.tools.insurer_api import call_tool   # unified tool dispatcher
 
 STATE_PATH = Path("data/state.json")
 
 
 # ─────────────────────────────────────────────────────────────
-# MOCK INSURER API TOOL
-# src/tools/insurer_api.py is called here as a tool
+# TOOL WRAPPER
+# Calls the real insurer API tool from src/tools/insurer_api.py
 # ─────────────────────────────────────────────────────────────
 
-def call_insurer_api(insurer: str, cpt_codes: list[str]) -> dict:
+def fetch_plan_details(plan_key: str, cpt_codes: list) -> dict:
     """
-    Mock tool call to insurer API.
-    In production this would be a real HTTP request.
-    Returns plan details: deductible, coinsurance, out-of-pocket max.
+    Tool call: get_plan_details
+    Fetches plan configuration from the mock insurer API.
+    Returns deductible, coinsurance, OOP max, covered CPTs.
     """
-    print(f"  [TOOL] Calling mock insurer API → {insurer}...")
-
-    plans = {
-        "Insurer1_PlanA": {
-            "insurer": "Insurer1",
-            "plan": "Plan A",
-            "annual_deductible_inr": 10000,
-            "deductible_met_inr": 10000,       # already fully met this year
-            "coinsurance_percent": 20,          # patient pays 20% after deductible
-            "out_of_pocket_max_inr": 100000,
-            "out_of_pocket_met_inr": 10000,
-            "pre_auth_required_cpts": ["29888", "29881"],
-            "covered_cpts": ["29888", "29881", "97161", "97110", "97140", "97112"],
-        },
-        "Insurer2_PlanB": {
-            "insurer": "Insurer2",
-            "plan": "Plan B",
-            "annual_deductible_inr": 15000,
-            "deductible_met_inr": 15000,       # already fully met this year
-            "coinsurance_percent": 10,          # patient pays 10% after deductible
-            "out_of_pocket_max_inr": 75000,
-            "out_of_pocket_met_inr": 15000,
-            "pre_auth_required_cpts": ["29888", "29881"],
-            "covered_cpts": ["29888", "29881", "97161", "97110", "97140", "97112"],
-        },
-    }
-
-    # Check which CPT codes need pre-auth
-    plan_data = plans.get(insurer, {})
-    pre_auth_needed = [
-        c for c in cpt_codes
-        if c in plan_data.get("pre_auth_required_cpts", [])
-    ]
-    plan_data["pre_auth_needed_for"] = pre_auth_needed
-    return plan_data
+    result = call_tool("get_plan_details", plan_key=plan_key)
+    # Also verify coverage for the specific CPT codes
+    coverage = call_tool("verify_coverage", plan_key=plan_key, cpt_codes=cpt_codes)
+    result["coverage_check"] = coverage
+    result["pre_auth_needed_for"] = coverage.get("requires_pre_auth", [])
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -231,10 +208,10 @@ def run_cob_engine():
         for c in state["pt_invoice"].get("inferred_cpt_codes", [])
     ]
 
-    # ── TOOL CALLS: fetch plan details from mock insurer API ──
-    print("\n  [TOOL CALLS] Fetching plan details from mock insurer API...")
-    plan_a = call_insurer_api("Insurer1_PlanA", surgery_cpts + pt_cpts)
-    plan_b = call_insurer_api("Insurer2_PlanB", surgery_cpts + pt_cpts)
+    # ── TOOL CALLS: fetch plan details from src/tools/insurer_api.py ──
+    print("\n  [TOOL CALLS] Fetching plan details from insurer API tool...")
+    plan_a = fetch_plan_details("Insurer1_PlanA", surgery_cpts + pt_cpts)
+    plan_b = fetch_plan_details("Insurer2_PlanB", surgery_cpts + pt_cpts)
 
     # ─────────────────────────────────────────
     # CLAIM 1: Aarav's ACL Surgery
