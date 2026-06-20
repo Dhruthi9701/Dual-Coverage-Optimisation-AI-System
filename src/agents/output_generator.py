@@ -298,13 +298,19 @@ def generate_priya_preauth(state):
 
     pdf.section_title("3. SERVICES & CPT CODES (Agent-Inferred)")
     pdf.body("Note: Original invoice had no CPT codes. Codes below inferred by DuCO-Agent.")
-    rows = [
-        ("97161", "PT Evaluation -- High Complexity",         "1",  "2,000"),
-        ("97110", "Therapeutic Exercise (x10 sessions)",      "10", "15,000"),
-        ("97140", "Manual Therapy -- Spinal Mobilisation",    "2",  "4,000"),
-        ("97112", "Neuromuscular Re-education",               "1",  "2,000"),
-        ("97110", "Therapeutic Exercise + Dry Needling",      "1",  "2,500"),
-    ]
+    
+    # Generate service table dynamically from PT invoice line items
+    line_items = pt.get("line_items", [])
+    if not line_items:
+        # Fallback if line_items not found in state
+        line_items = [
+            {"cpt_code": "97161", "description": "PT Evaluation -- High Complexity", "units": 1, "amount_inr": 2000},
+            {"cpt_code": "97110", "description": "Therapeutic Exercise (x10 sessions)", "units": 10, "amount_inr": 15000},
+            {"cpt_code": "97140", "description": "Manual Therapy -- Spinal Mobilisation", "units": 2, "amount_inr": 4000},
+            {"cpt_code": "97112", "description": "Neuromuscular Re-education", "units": 1, "amount_inr": 2000},
+            {"cpt_code": "97110", "description": "Therapeutic Exercise + Dry Needling", "units": 1, "amount_inr": 2500},
+        ]
+    
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_fill_color(200, 212, 240)
     pdf.cell(28, 6, "CPT", fill=True, border=1)
@@ -312,16 +318,24 @@ def generate_priya_preauth(state):
     pdf.cell(15, 6, "Units", fill=True, border=1)
     pdf.cell(0,  6, "Rs.", fill=True, border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
-    for code, desc, units, amt in rows:
+    
+    for item in line_items:
+        code = str(item.get("cpt_code", ""))[:12]
+        desc = str(item.get("description", ""))[:50]
+        units = str(item.get("units", "1"))
+        amt = f"{item.get('amount_inr', 0):,.0f}"
         pdf.cell(28, 6, code, border=1)
-        pdf.cell(100, 6, desc[:50], border=1)
+        pdf.cell(100, 6, desc, border=1)
         pdf.cell(15, 6, units, border=1, align="C")
         pdf.cell(0, 6, amt, border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    # Extract total dynamically
+    total_amount = pt.get("total_amount_inr", 30000)
     pdf.set_font("Helvetica", "B", 9)
     pdf.cell(143, 6, "TOTAL (incl. GST 5%)", border=1, fill=True)
-    pdf.cell(0, 6, "30,000", border=1, fill=True, align="R",
+    pdf.cell(0, 6, f"{total_amount:,.0f}", border=1, fill=True, align="R",
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(3)
+
 
     pdf.section_title("4. DUAL COVERAGE -- COB NOTICE")
     pdf.body(
