@@ -101,25 +101,30 @@ def print_final_summary():
     fam  = cob.get("family_summary", {})
     outs = state.get("outputs", {})
 
-    print("""
-+======================================================+
-|              DUCO-AGENT PIPELINE COMPLETE            |
-+======================================================+""")
-    print(f"|  Aarav Surgery  -> Insurer2 pays: Rs.{a.get('primary_pays_inr',405000):>10,.0f}       |")
-    print(f"|                    Insurer1 pays: Rs.{a.get('secondary_pays_inr',36000):>10,.0f}       |")
-    print(f"|                    Aarav pays  : Rs.{a.get('patient_pays_inr',9000):>10,.0f}       |")
-    print(f"|------------------------------------------------------|")
-    print(f"|  Priya PT Bills -> Insurer1 pays: Rs.{p.get('primary_pays_inr',24000):>10,.0f}       |")
-    print(f"|                    Insurer2 pays: Rs.{p.get('secondary_pays_inr',5400):>10,.0f}       |")
-    print(f"|                    Priya pays  : Rs.{p.get('patient_pays_inr',600):>10,.0f}       |")
-    print(f"|------------------------------------------------------|")
-    print(f"|  Family SAVES   : Rs.{fam.get('total_savings_inr',470400):>10,.0f} ({fam.get('savings_percent',98.0)}%)       |")
-    print(f"|------------------------------------------------------|")
-    print(f"|  Outputs in outputs/ folder:                         |")
-    for key in ["aarav_preauth_letter","priya_preauth_letter","cost_flow_chart","patient_briefing"]:
-        val = outs.get(key, "")
-        short = Path(val).name if val else "N/A"
-        print(f"|    {short:<50}|")
+    print("\n" + "="*54)
+    print("  ALL OUTPUTS GENERATED:")
+    for k, v in outs.items():
+        print(f"    {k:30s} -> {v}")
+    
+    print("+======================================================+")
+    print("|              DUCO-AGENT PIPELINE COMPLETE            |")
+    print("+======================================================+")
+    print(f"|  Aarav Surgery  -> Insurer2 pays: Rs. {a.get('primary_pays_inr', 0):>8,.0f}       |")
+    print(f"|                    Insurer1 pays: Rs. {a.get('secondary_pays_inr', 0):>8,.0f}       |")
+    print(f"|                    Aarav pays  : Rs. {a.get('patient_pays_inr', 0):>8,.0f}       |")
+    print("|------------------------------------------------------|")
+    print(f"|  Priya PT Bills -> Insurer1 pays: Rs. {p.get('primary_pays_inr', 0):>8,.0f}       |")
+    print(f"|                    Insurer2 pays: Rs. {p.get('secondary_pays_inr', 0):>8,.0f}       |")
+    print(f"|                    Priya pays  : Rs. {p.get('patient_pays_inr', 0):>8,.0f}       |")
+    print("|------------------------------------------------------|")
+    print(f"|  Family SAVES   : Rs. {fam.get('total_savings_inr', 0):>8,.0f} ({fam.get('savings_percent', 0):.1f}%)       |")
+    print("|------------------------------------------------------|")
+    print("|  Outputs in outputs/ folder:                         |")
+    print("|    aarav_preauth_letter.pdf                          |")
+    print("|    priya_preauth_letter.pdf                          |")
+    print("|    cost_flow_chart.png                               |")
+    print("|    patient_briefing.txt                              |")
+    print("|    patient_briefing.mp3                              |")
     print("+======================================================+")
 
 
