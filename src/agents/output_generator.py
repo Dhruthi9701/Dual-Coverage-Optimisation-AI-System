@@ -105,8 +105,11 @@ def generate_aarav_preauth(state):
 
     pdf.section_title("1. PATIENT & POLICY DETAILS")
     # Extract patient details dynamically from state
-    mri_patient = mri.get("patient_name", "Aarav Sen")
-    mri_age = mri.get("patient_age", "34")
+    mri_patient = mri.get("patient_name")
+    mri_age = mri.get("patient_age")
+    if not mri_patient or not mri_age:
+        raise ValueError("Missing required patient details from MRI report")
+
     primary_plan = state.get("plan_details", {}).get(cob.get("primary_insurer", "Insurer2_PlanB"), {})
     secondary_plan = state.get("plan_details", {}).get(cob.get("secondary_insurer", "Insurer1_PlanA"), {})
     primary_policy_no = primary_plan.get("policy_number", "PLB-2024-AS-00441")
@@ -125,13 +128,17 @@ def generate_aarav_preauth(state):
     pdf.ln(2)
 
     pdf.section_title("2. CLINICAL JUSTIFICATION")
-    diag = mri.get("primary_diagnosis", "Complete ACL tear, Right Knee")
+    diag = mri.get("primary_diagnosis")
+    if not diag:
+        raise ValueError("Missing primary diagnosis from MRI report")
     # Extract ICD codes dynamically from surgeon estimate procedures
     procedures = surg.get("procedures", [])
     icd_codes = [p.get("icd10_code") for p in procedures if p.get("icd10_code")]
     primary_icd = icd_codes[0] if len(icd_codes) > 0 else "S83.511A"
     secondary_icd = icd_codes[1] if len(icd_codes) > 1 else "S83.211A"
-    mri_date = mri.get("study_date", "12-May-2024")
+    mri_date = mri.get("study_date")
+    if not mri_date:
+        raise ValueError("Missing study date from MRI report")
     
     for k, v in [
         ("Primary Dx:", diag[:70]),
@@ -181,8 +188,11 @@ def generate_aarav_preauth(state):
     pdf.ln(3)
 
     pdf.section_title("4. TREATING PHYSICIAN & FACILITY")
-    surgeon_name = surg.get("surgeon_name", "Dr. Kiran Rao")
-    hospital_name = surg.get("hospital_name", "Apollo Orthopaedic & Sports Medicine Centre")
+    surgeon_name = surg.get("surgeon_name")
+    hospital_name = surg.get("hospital_name")
+    if not surgeon_name or not hospital_name:
+        raise ValueError("Missing surgeon/hospital details from surgeon estimate")
+
     
     for k, v in [
         ("Surgeon:", f"{surgeon_name}, MS Ortho, Fellowship Sports Medicine"),
@@ -253,7 +263,10 @@ def generate_priya_preauth(state):
 
     pdf.section_title("1. PATIENT & POLICY DETAILS")
     # Extract patient details dynamically from state
-    pt_patient = pt.get("patient_name", "Priya Sen")
+    pt_patient = pt.get("patient_name")
+    if not pt_patient:
+        raise ValueError("Missing required patient name from PT invoice")
+
     primary_plan = state.get("plan_details", {}).get(cob.get("primary_insurer", "Insurer1_PlanA"), {})
     secondary_plan = state.get("plan_details", {}).get(cob.get("secondary_insurer", "Insurer2_PlanB"), {})
     primary_policy_no = primary_plan.get("policy_number", "PLA-2024-PS-00219")
@@ -272,12 +285,24 @@ def generate_priya_preauth(state):
 
 
     pdf.section_title("2. CLINICAL JUSTIFICATION")
-    # Extract clinical details dynamically from PT invoice
-    diagnosis = pt.get("diagnosis", "Chronic Low Back Pain -- Lumbar Region")
-    icd_code = pt.get("icd10_code", "M54.5")
-    referring_doctor = pt.get("referring_doctor", "Dr. Sunita Mehta, MD (Physical Medicine)")
-    clinic_name = pt.get("clinic_name", "CureMotion Physiotherapy, Andheri West, Mumbai")
-    service_period = pt.get("service_period", "01 Apr 2024 -- 18 May 2024  (14 sessions)")
+    # Extract clinical details dynamically from PT invoice (using actual field names from intake agent)
+    diagnosis = pt.get("diagnosis_mentioned")  # intake agent uses "diagnosis_mentioned"
+    icd_codes = pt.get("inferred_icd10_codes", [])
+    icd_code = icd_codes[0] if icd_codes else None
+    referring_doctor = pt.get("referring_doctor")
+    clinic_name = pt.get("clinic_name")
+    # service_period is constructed from line_items dates
+    line_items = pt.get("line_items", [])
+    if line_items:
+        dates = [item.get("date") for item in line_items if item.get("date")]
+        service_period = f"{dates[0]} -- {dates[-1]}  ({len(line_items)} sessions)" if dates else None
+    else:
+        service_period = None
+    
+    if not all([diagnosis, icd_code, referring_doctor, clinic_name, service_period]):
+        raise ValueError(f"Missing required PT invoice details: diagnosis={diagnosis}, icd_code={icd_code}, referring_doctor={referring_doctor}, clinic_name={clinic_name}, service_period={service_period}")
+
+
     
     for k, v in [
         ("Diagnosis:", diagnosis),

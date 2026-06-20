@@ -349,7 +349,10 @@ def run_cob_engine():
     aarav_primary_plan   = plan_b if aarav_primary_key   == "Insurer2_PlanB" else plan_a
     aarav_secondary_plan = plan_a if aarav_secondary_key == "Insurer1_PlanA" else plan_b
 
-    aarav_total = state["surgeon_estimate"].get("total_surgical_amount_inr", 450000)
+    aarav_total = state["surgeon_estimate"].get("total_surgical_amount_inr")
+    if not aarav_total:
+        raise ValueError("Missing total surgical amount from surgeon estimate")
+
     aarav_cob   = calculate_cob_payment(aarav_total, aarav_primary_plan, aarav_secondary_plan, "Aarav")
     aarav_math  = audit_cob_math(aarav_cob)
     print(f"  [AUDIT] Math check: {aarav_math['note']}")
@@ -378,7 +381,10 @@ def run_cob_engine():
     priya_primary_plan   = plan_a if priya_primary_key   == "Insurer1_PlanA" else plan_b
     priya_secondary_plan = plan_b if priya_secondary_key == "Insurer2_PlanB" else plan_a
 
-    priya_total = state["pt_invoice"].get("total_amount_inr", 30000)
+    priya_total = state["pt_invoice"].get("total_amount_inr")
+    if not priya_total:
+        raise ValueError("Missing total amount from PT invoice")
+
     priya_cob   = calculate_cob_payment(priya_total, priya_primary_plan, priya_secondary_plan, "Priya")
     priya_math  = audit_cob_math(priya_cob)
     print(f"  [AUDIT] Math check: {priya_math['note']}")
