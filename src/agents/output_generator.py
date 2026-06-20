@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.ticker
+import pyttsx3
 
 STATE_PATH = Path("data/state.json")
 OUTPUT_DIR = Path("outputs")
@@ -568,6 +569,43 @@ Re-run anytime: python src/agents/intake_agent.py
     print(f"  [OUTPUT] Saved -> {path}")
     return path
 
+def generate_patient_audio_briefing(state: dict):
+    """Generate audio briefing from text briefing (offline TTS)."""
+    print("  [OUTPUT] Generating patient audio briefing...")
+    
+    text_path = OUTPUT_DIR / "patient_briefing.txt"
+    if not text_path.exists():
+        raise FileNotFoundError("patient_briefing.txt must be generated first")
+    
+    briefing_text = text_path.read_text(encoding="utf-8")
+    
+    # Remove header decorations and focus on patient-friendly content
+    lines = briefing_text.split('\n')
+    start_idx = 0
+    for i, line in enumerate(lines):
+        if 'Hi Aarav and Priya' in line:
+            start_idx = i
+            break
+    
+    audio_text = '\n'.join(lines[start_idx:])
+    
+    # Generate speech using offline TTS
+    audio_path = OUTPUT_DIR / "patient_briefing.mp3"
+    try:
+        engine = pyttsx3.init()
+        engine.setProperty('rate', 150)  # Speed of speech
+        engine.setProperty('volume', 1.0)  # Volume (0.0 to 1.0)
+        engine.save_to_file(audio_text, str(audio_path))
+        engine.runAndWait()
+        print(f"  [OUTPUT] Saved -> {audio_path}")
+    except Exception as e:
+        # Graceful fallback if TTS fails
+        print(f"  [OUTPUT] Audio generation skipped (error: {type(e).__name__})")
+        print(f"  [OUTPUT] Text briefing available at: {text_path}")
+        return None
+    
+    return audio_path
+
 
 def run_output_generator():
     print("\n" + "="*50)
@@ -586,6 +624,7 @@ def run_output_generator():
     letter_p = generate_priya_preauth(state)
     chart    = generate_cost_flow_chart(state)
     briefing = generate_patient_briefing(state)
+    audio    = generate_patient_audio_briefing(state)  # ADD THIS LINE
 
     state["agent_state"] = "DONE"
     state["outputs"] = {
@@ -593,6 +632,7 @@ def run_output_generator():
         "priya_preauth_letter": str(letter_p),
         "cost_flow_chart":      str(chart),
         "patient_briefing":     str(briefing),
+        "patient_audio_briefing": str(audio),  # ADD THIS LINE
     }
 
     with open(STATE_PATH, "w", encoding="utf-8") as f:
@@ -604,6 +644,7 @@ def run_output_generator():
     for k, v in state["outputs"].items():
         print(f"    {k:30s} -> {v}")
     print()
+
 
 
 if __name__ == "__main__":
