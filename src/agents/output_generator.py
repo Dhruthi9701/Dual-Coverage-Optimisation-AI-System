@@ -143,15 +143,17 @@ def generate_aarav_preauth(state):
     pdf.cell(100, 6, "Description", fill=True, border=1)
     pdf.cell(0, 6, "Amount (Rs.)", fill=True, border=1,
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    import re as _re
     pdf.set_font("Helvetica", "", 9)
     for p in procedures:
-        import re as _re
         raw_amt = p.get("amount_inr", 0)
         cleaned = _re.sub(r"[^\d.]", "", str(raw_amt))
-        amt = float(cleaned) if cleaned else 0
-        pdf.cell(32, 6, str(p.get("cpt_code", ""))[:12], border=1)
-        pdf.cell(100, 6, str(p.get("description", ""))[:55], border=1)
-        pdf.cell(0, 6, f"{amt:,.0f}", border=1, align="R",
+        amt_str = f"{float(cleaned):,.0f}" if cleaned else "Included"
+        cpt     = str(p.get("cpt_code", ""))[:12]
+        desc    = str(p.get("description", ""))[:55]
+        pdf.cell(32, 6, cpt, border=1)
+        pdf.cell(100, 6, desc, border=1)
+        pdf.cell(0, 6, amt_str, border=1, align="R",
                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     raw_total = surg.get("total_surgical_amount_inr", 450000)
     total_surg = float(_re.sub(r"[^\d.]", "", str(raw_total))) if raw_total else 450000
