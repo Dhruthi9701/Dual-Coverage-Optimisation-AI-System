@@ -42,8 +42,15 @@ def fetch_plan_details(plan_key: str, cpt_codes: list) -> dict:
 
 def determine_primary_insurer(patient: str, claim_type: str) -> tuple[str, str, str]:
     """
-    Coordination of Benefits Rule:
-    The Birthday Rule / Subscriber Rule — standard Indian dual-coverage COB:
+    Coordination of Benefits Rule — Subscriber Rule (standard for dual
+    corporate-policy COB in India): whichever plan you are the *named
+    policyholder* on is PRIMARY for your own claims; the plan you are
+    enrolled on only as a *dependent* is SECONDARY.
+    (Note: this is distinct from the US "Birthday Rule," which resolves
+    primacy for a dependent CHILD covered under both parents' plans by
+    comparing birth months — not applicable here since both Aarav and
+    Priya are each a named subscriber on one plan and a dependent on
+    the other.)
 
     For AARAV's surgery:
       - Plan A (Insurer1): Priya is Primary, Aarav is Dependent → SECONDARY for Aarav
@@ -88,35 +95,51 @@ def calculate_cob_payment(
     patient: str,
 ) -> dict:
     """
-    Standard COB calculation (non-duplication method):
+    Standard COB calculation (non-duplication method, IRDAI-aligned):
 
-    Step 1: Primary pays after applying deductible + coinsurance
-    Step 2: Secondary pays the remaining balance (up to its own limits)
-    Step 3: Patient pays whatever is left
+    Step 0: Apply primary deductible (remaining, if any)
+    Step 1: Primary pays after deductible + coinsurance
+    Step 2: Secondary pays the remaining balance, but NOT more than it would
+            have paid had it been primary (non-duplication clause)
+    Step 3: Patient pays whatever is left (capped by secondary OOP max)
 
-    Since both deductibles are already met (realistic mid-year scenario),
-    the math simplifies to coinsurance only.
+    The function also calculates the counterfactual single-plan OOP so the
+    patient briefing can report actual savings accurately.
     """
 
-    # ── Primary insurer calculation ──
+    # ── Step 0: Apply primary deductible (partial deductible support) ──
+    primary_deductible_remaining = max(
+        0, primary_plan["annual_deductible_inr"] - primary_plan["deductible_met_inr"]
+    )
+    amount_after_primary_deductible = max(0, total_billed_inr - primary_deductible_remaining)
+
+    # ── Step 1: Primary insurer calculation ──
     primary_coinsurance_rate = primary_plan["coinsurance_percent"] / 100
-    primary_pays = round(total_billed_inr * (1 - primary_coinsurance_rate))
-    primary_patient_responsibility = round(total_billed_inr * primary_coinsurance_rate)
+    primary_pays = round(amount_after_primary_deductible * (1 - primary_coinsurance_rate))
+    primary_patient_responsibility = round(total_billed_inr - primary_pays)
 
-    # ── Secondary insurer calculation ──
-    # Secondary covers the primary's patient responsibility
-    # but subject to its own coinsurance rate
+    # ── Step 2: Secondary insurer calculation (non-duplication clause) ──
+    # Non-duplication: secondary will not pay more than it would have paid
+    # as the primary insurer for the same claim.
+    secondary_deductible_remaining = max(
+        0, secondary_plan["annual_deductible_inr"] - secondary_plan["deductible_met_inr"]
+    )
+    amount_after_secondary_deductible = max(0, total_billed_inr - secondary_deductible_remaining)
     secondary_coinsurance_rate = secondary_plan["coinsurance_percent"] / 100
-    secondary_pays = round(primary_patient_responsibility * (1 - secondary_coinsurance_rate))
-    final_patient_pays = round(primary_patient_responsibility * secondary_coinsurance_rate)
+    secondary_max_as_primary = round(
+        amount_after_secondary_deductible * (1 - secondary_coinsurance_rate)
+    )
 
-    # ── Out-of-pocket max check (applied to final patient amount) ──
-    # Use the secondary plan's remaining OOP since that's what covers
-    # the patient's residual after both insurers pay
+    # Secondary's actual benefit = min(what primary left unpaid, what secondary would pay as primary)
+    # — this is the IRDAI non-duplication clause in practice
+    secondary_pays_raw = round(primary_patient_responsibility * (1 - secondary_coinsurance_rate))
+    secondary_pays = min(secondary_pays_raw, secondary_max_as_primary)
+    final_patient_pays = max(0, total_billed_inr - primary_pays - secondary_pays)
+
+    # ── Out-of-pocket max check ──
     remaining_oop_secondary = (
         secondary_plan["out_of_pocket_max_inr"] - secondary_plan["out_of_pocket_met_inr"]
     )
-
     oop_note = ""
     if final_patient_pays > remaining_oop_secondary:
         capped = final_patient_pays - remaining_oop_secondary
@@ -124,25 +147,53 @@ def calculate_cob_payment(
         secondary_pays += capped
         oop_note = f"Out-of-pocket max applied: ₹{capped:,.0f} shifted to secondary."
 
+    # ── Counterfactual: what patient would pay with primary only (no dual coverage) ──
+    single_plan_patient_pays = round(
+        max(0, amount_after_primary_deductible) * primary_coinsurance_rate
+        + primary_deductible_remaining
+    )
+    dual_coverage_savings = round(single_plan_patient_pays - final_patient_pays)
+
     print(f"  [COB] Total billed       : ₹{total_billed_inr:>10,.0f}")
     print(f"  [COB] Primary pays       : ₹{primary_pays:>10,.0f}")
+
     print(f"  [COB] Secondary pays     : ₹{secondary_pays:>10,.0f}")
     print(f"  [COB] Patient pays       : ₹{final_patient_pays:>10,.0f}")
+    print(f"  [COB] Without dual cover : ₹{single_plan_patient_pays:>10,.0f}  (counterfactual)")
+    print(f"  [COB] Dual-cover savings : ₹{dual_coverage_savings:>10,.0f}")
+
+    primary_pct   = primary_plan["coinsurance_percent"]
+    secondary_pct = secondary_plan["coinsurance_percent"]
+    formula = (
+        f"Primary deductible remaining: ₹{primary_deductible_remaining:,.0f}. "
+        f"Primary pays {100 - primary_pct:.0f}% of post-deductible amount. "
+        f"Secondary (non-duplication): pays min(its share of primary's patient responsibility, "
+        f"what it would pay as primary). "
+        f"Patient pays remainder."
+    )
 
     return {
-        "total_billed_inr":      total_billed_inr,
-        "primary_pays_inr":      primary_pays,
-        "secondary_pays_inr":    secondary_pays,
-        "patient_pays_inr":      final_patient_pays,
-        "primary_coinsurance":   f"{primary_plan['coinsurance_percent']}%",
-        "secondary_coinsurance": f"{secondary_plan['coinsurance_percent']}%",
-        "deductibles_note":      "Both annual deductibles already met (mid-year scenario).",
-        "oop_note":              oop_note,
+        "total_billed_inr":               total_billed_inr,
+        "primary_pays_inr":               primary_pays,
+        "secondary_pays_inr":             secondary_pays,
+        "patient_pays_inr":               final_patient_pays,
+        "primary_coinsurance":            f"{primary_plan['coinsurance_percent']}%",
+        "secondary_coinsurance":          f"{secondary_plan['coinsurance_percent']}%",
+        "primary_deductible_applied_inr": primary_deductible_remaining,
+        "non_duplication_cap_applied":    secondary_pays < secondary_pays_raw,
+        "counterfactual_single_plan_oop": single_plan_patient_pays,
+        "dual_coverage_savings_inr":      dual_coverage_savings,
+        "deductibles_note": (
+            "Both annual deductibles already met (mid-year scenario)."
+            if primary_deductible_remaining == 0
+            else f"Primary deductible partially met; ₹{primary_deductible_remaining:,.0f} applied first."
+        ),
+        "oop_note":  oop_note,
         "math_audit": {
             "check_sum_correct": abs(
                 primary_pays + secondary_pays + final_patient_pays - total_billed_inr
             ) < 1,
-            "formula": "Primary(80%) + Secondary(90% of remaining 20%) + Patient(10% of 20%)",
+            "formula": formula,
         },
     }
 
@@ -192,26 +243,84 @@ def run_cob_engine():
     with open(STATE_PATH, "r", encoding="utf-8") as f:
         state = json.load(f)
 
-    if state.get("agent_state") != "COB_READY":
+    if state.get("agent_state") not in ("COB_READY",):
+        if state.get("agent_state") == "INTAKE_FAILED":
+            raise RuntimeError(
+                "Refusing to run COB on an INTAKE_FAILED state — intake validation "
+                f"never passed (issues: {state.get('validation_issues')}). "
+                "Fix the underlying extraction and re-run intake_agent first."
+            )
         print(f"  [WARN] Agent state is '{state.get('agent_state')}', expected 'COB_READY'.")
-        print("  [WARN] Proceeding anyway...")
+        print("  [WARN] Proceeding anyway (non-fatal state mismatch)...")
 
     state["agent_state"] = "COB_REASONING"
 
-    # ── Pull CPT codes from intake ──
-    surgery_cpts  = [
-        p["cpt_code"].replace("CPT ", "")
+    # ── Tool call audit log (every API call is recorded for auditability) ──
+    import datetime as _dt
+    tool_call_log = []
+
+    _orig_call_tool = __import__("src.tools.insurer_api", fromlist=["call_tool"]).call_tool
+
+    def _logged_call_tool(tool_name: str, **kwargs) -> dict:
+        entry = {
+            "timestamp": _dt.datetime.utcnow().isoformat() + "Z",
+            "tool": tool_name,
+            "inputs": {k: (v if not isinstance(v, list) or len(v) <= 10 else v[:10]) for k, v in kwargs.items()},
+        }
+        result = _orig_call_tool(tool_name, **kwargs)
+        entry["result_summary"] = {
+            k: v for k, v in result.items()
+            if k in ("decision", "status", "auth_number", "insurer", "plan_code",
+                     "coinsurance_percent", "deductible_met_inr", "covered", "not_covered",
+                     "requires_pre_auth", "denial_reason")
+        }
+        tool_call_log.append(entry)
+        return result
+
+    # Monkey-patch the dispatcher for this run so all downstream calls are logged
+    import src.tools.insurer_api as _api_mod
+    _api_mod.call_tool = _logged_call_tool
+
+    # Re-import to pick up the patched version in cob_engine's own scope
+    from src.tools.insurer_api import call_tool   # noqa: F811
+
+    # ── Pull CPT codes from intake, SCOPED PER CLAIM ──
+    # (Previously both insurer lookups were checked against the combined
+    # surgery+PT code list, which leaked Aarav's surgical CPTs into Priya's
+    # pre-auth-required flag. Each claim now only checks its own codes.)
+    import re as _re
+
+    def _normalise_cpt(raw: str) -> str:
+        """Strip any 'CPT' prefix (with or without a trailing space) and return
+        only the numeric/alpha code, e.g. 'CPT 29888' → '29888', 'CPT00400' → '00400'."""
+        return _re.sub(r"^CPT\s*", "", str(raw).strip())
+
+    # Only keep codes that look like real CPT numbers (digits, 5 chars).
+    # This filters out sentinel tokens like "IMPLANTS" AND malformed codes
+    # like "CPT00400" that appear because the vision model may not add the space.
+    # Anesthesia code 00400 is included deliberately — it IS in covered_cpt_codes.
+    surgery_cpts = [
+        _normalise_cpt(p["cpt_code"])
         for p in state["surgeon_estimate"].get("procedures", [])
+        if p.get("cpt_code") and p["cpt_code"] not in ("IMPLANTS",)
+        and _re.match(r"^(CPT\s*)?\d{5}$", str(p["cpt_code"]).strip())
     ]
-    pt_cpts = [
-        c.split(":")[0].replace("CPT ", "").strip()
-        for c in state["pt_invoice"].get("inferred_cpt_codes", [])
-    ]
+    pt_line_items = state["pt_invoice"].get("line_items", [])
+    pt_cpts = list(dict.fromkeys(   # deduplicate while preserving order
+        _normalise_cpt(li["inferred_cpt_code"])
+        for li in pt_line_items
+        if li.get("inferred_cpt_code")
+    ))
 
     # ── TOOL CALLS: fetch plan details from src/tools/insurer_api.py ──
     print("\n  [TOOL CALLS] Fetching plan details from insurer API tool...")
-    plan_a = fetch_plan_details("Insurer1_PlanA", surgery_cpts + pt_cpts)
-    plan_b = fetch_plan_details("Insurer2_PlanB", surgery_cpts + pt_cpts)
+    plan_a_for_surgery = fetch_plan_details("Insurer1_PlanA", surgery_cpts)
+    plan_b_for_surgery = fetch_plan_details("Insurer2_PlanB", surgery_cpts)
+    plan_a_for_pt       = fetch_plan_details("Insurer1_PlanA", pt_cpts)
+    plan_b_for_pt       = fetch_plan_details("Insurer2_PlanB", pt_cpts)
+    # plan_a / plan_b kept for the COB payment maths (coinsurance/OOP are
+    # plan-level, not claim-specific, so either claim-scoped fetch works)
+    plan_a, plan_b = plan_a_for_surgery, plan_b_for_surgery
 
     # ─────────────────────────────────────────
     # CLAIM 1: Aarav's ACL Surgery
@@ -228,6 +337,18 @@ def run_cob_engine():
     aarav_math  = audit_cob_math(aarav_cob)
     print(f"  [AUDIT] Math check: {aarav_math['note']}")
 
+    # ── TOOL CALL: request_pre_authorization (both insurers — surgeon's
+    # estimate explicitly notes pre-auth is required from both) ──
+    aarav_icd10 = [c.get("icd10_code") for c in state["surgeon_estimate"].get("procedures", []) if c.get("icd10_code")]
+    aarav_preauth_primary = call_tool(
+        "request_pre_authorization", plan_key=aarav_primary_key, cpt_codes=surgery_cpts,
+        patient_name="Aarav Sen", diagnosis_codes=aarav_icd10,
+    )
+    aarav_preauth_secondary = call_tool(
+        "request_pre_authorization", plan_key=aarav_secondary_key, cpt_codes=surgery_cpts,
+        patient_name="Aarav Sen", diagnosis_codes=aarav_icd10,
+    )
+
     # ─────────────────────────────────────────
     # CLAIM 2: Priya's PT Bills
     # ─────────────────────────────────────────
@@ -242,6 +363,17 @@ def run_cob_engine():
     priya_cob   = calculate_cob_payment(priya_total, priya_primary_plan, priya_secondary_plan, "Priya")
     priya_math  = audit_cob_math(priya_cob)
     print(f"  [AUDIT] Math check: {priya_math['note']}")
+
+    # ── TOOL CALL: request_pre_authorization (both insurers) ──
+    priya_icd10 = [c.split(":")[0].strip() for c in state["pt_invoice"].get("inferred_icd10_codes", [])]
+    priya_preauth_primary = call_tool(
+        "request_pre_authorization", plan_key=priya_primary_key, cpt_codes=pt_cpts,
+        patient_name="Priya Sen", diagnosis_codes=priya_icd10,
+    )
+    priya_preauth_secondary = call_tool(
+        "request_pre_authorization", plan_key=priya_secondary_key, cpt_codes=pt_cpts,
+        patient_name="Priya Sen", diagnosis_codes=priya_icd10,
+    )
 
     # ─────────────────────────────────────────
     # COMBINED SUMMARY
@@ -265,7 +397,11 @@ def run_cob_engine():
             "cob_reasoning":    aarav_cob_reason,
             "payment_breakdown": aarav_cob,
             "math_audit":       aarav_math,
-            "pre_auth_required": plan_b.get("pre_auth_needed_for", []),
+            "pre_auth_required": plan_b_for_surgery.get("pre_auth_needed_for", []),
+            "preauth_decision": {
+                aarav_primary_key:   aarav_preauth_primary,
+                aarav_secondary_key: aarav_preauth_secondary,
+            },
         },
         "priya_pt": {
             "patient":          "Priya Sen",
@@ -275,7 +411,11 @@ def run_cob_engine():
             "cob_reasoning":    priya_cob_reason,
             "payment_breakdown": priya_cob,
             "math_audit":       priya_math,
-            "pre_auth_required": plan_a.get("pre_auth_needed_for", []),
+            "pre_auth_required": plan_a_for_pt.get("pre_auth_needed_for", []),
+            "preauth_decision": {
+                priya_primary_key:   priya_preauth_primary,
+                priya_secondary_key: priya_preauth_secondary,
+            },
         },
         "family_summary": {
             "total_billed_inr":   total_family_bill,
@@ -285,7 +425,18 @@ def run_cob_engine():
         },
     }
 
+    # Persist the raw tool-returned plan records too (policy number, subscriber
+    # name, claim address) so the output stage can pull them dynamically
+    # instead of hardcoding values that happen to match the mock DB.
+    state["plan_details"] = {
+        "Insurer1_PlanA": plan_a,
+        "Insurer2_PlanB": plan_b,
+    }
+
     state["agent_state"] = "OUTPUT_READY"
+
+    # Persist full tool call audit trail
+    state["tool_call_log"] = tool_call_log
 
     # ── Save updated state ──
     with open(STATE_PATH, "w", encoding="utf-8") as f:
