@@ -1,9 +1,5 @@
-openai
-pillow
+google-genai
 pymupdf
-pytesseract
-python-dotenv
-requests
 fpdf2
 matplotlib
-google-genai
+Pillow
