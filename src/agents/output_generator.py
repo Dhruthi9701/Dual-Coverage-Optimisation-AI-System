@@ -252,27 +252,43 @@ def generate_priya_preauth(state):
     pdf.ln(3)
 
     pdf.section_title("1. PATIENT & POLICY DETAILS")
+    # Extract patient details dynamically from state
+    pt_patient = pt.get("patient_name", "Priya Sen")
+    primary_plan = state.get("plan_details", {}).get(cob.get("primary_insurer", "Insurer1_PlanA"), {})
+    secondary_plan = state.get("plan_details", {}).get(cob.get("secondary_insurer", "Insurer2_PlanB"), {})
+    primary_policy_no = primary_plan.get("policy_number", "PLA-2024-PS-00219")
+    secondary_subscriber = secondary_plan.get("subscriber_name", "Aarav Sen")
+    
     for k, v in [
-        ("Patient:", "Mrs. Priya Sen"),
+        ("Patient:", f"Mrs. {pt_patient}"),
         ("DOB:", "05-Sep-1992  (Age: 31)"),
-        ("Policy No:", "PLA-2024-PS-00219"),
+        ("Policy No:", primary_policy_no),
         ("Plan:", "Plan A -- Insurer1  (Primary Policyholder)"),
-        ("Secondary:", "Plan B -- Insurer2  (Dependent under Aarav Sen)"),
+        ("Secondary:", f"Plan B -- Insurer2  (Dependent under {secondary_subscriber})"),
         ("Employer:", "FinServ Solutions Ltd., Mumbai"),
     ]:
         pdf.kv(k, v)
     pdf.ln(2)
 
+
     pdf.section_title("2. CLINICAL JUSTIFICATION")
+    # Extract clinical details dynamically from PT invoice
+    diagnosis = pt.get("diagnosis", "Chronic Low Back Pain -- Lumbar Region")
+    icd_code = pt.get("icd10_code", "M54.5")
+    referring_doctor = pt.get("referring_doctor", "Dr. Sunita Mehta, MD (Physical Medicine)")
+    clinic_name = pt.get("clinic_name", "CureMotion Physiotherapy, Andheri West, Mumbai")
+    service_period = pt.get("service_period", "01 Apr 2024 -- 18 May 2024  (14 sessions)")
+    
     for k, v in [
-        ("Diagnosis:", "Chronic Low Back Pain -- Lumbar Region"),
-        ("ICD-10:", "M54.5 -- Low back pain"),
-        ("Referring Dr:", "Dr. Sunita Mehta, MD (Physical Medicine)"),
-        ("Clinic:", "CureMotion Physiotherapy, Andheri West, Mumbai"),
-        ("Period:", "01 Apr 2024 -- 18 May 2024  (14 sessions)"),
+        ("Diagnosis:", diagnosis),
+        ("ICD-10:", f"{icd_code} -- Low back pain"),
+        ("Referring Dr:", referring_doctor),
+        ("Clinic:", clinic_name),
+        ("Period:", service_period),
     ]:
         pdf.kv(k, v)
     pdf.ln(2)
+
     pdf.body(
         "Mrs. Priya Sen presented with chronic lumbar back pain impacting occupational functioning. "
         "A structured physiotherapy course was prescribed covering functional evaluation, "
