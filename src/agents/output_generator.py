@@ -87,7 +87,7 @@ def generate_aarav_preauth(state):
 
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 5, f"Date: {today}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.cell(0, 5, "Ref: PRE-AUTH/DUCO/2024/ACL/001", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, f"Ref: PRE-AUTH/DUCO/{date.today().year}/ACL/001", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(3)
 
     pdf.set_font("Helvetica", "B", 9)
@@ -214,7 +214,7 @@ def generate_priya_preauth(state):
 
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 5, f"Date: {today}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.cell(0, 5, "Ref: PRE-AUTH/DUCO/2024/PT/002", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, f"Ref: PRE-AUTH/DUCO/{date.today().year}/PT/002", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(3)
 
     pdf.set_font("Helvetica", "B", 9)
@@ -396,6 +396,28 @@ def generate_patient_briefing(state):
     p    = cob.get("priya_pt",      {}).get("payment_breakdown", {})
     fam  = cob.get("family_summary", {})
 
+    # Dynamic counterfactual savings (from COB engine, not hardcoded)
+    aarav_single_plan_oop = a.get(
+        "counterfactual_single_plan_oop",
+        round(a.get("total_billed_inr", 450000) * 0.10)  # fallback: primary coinsurance only
+    )
+    priya_single_plan_oop = p.get(
+        "counterfactual_single_plan_oop",
+        round(p.get("total_billed_inr", 30000) * 0.20)
+    )
+    aarav_savings = a.get("dual_coverage_savings_inr", aarav_single_plan_oop - a.get("patient_pays_inr", 9000))
+    priya_savings = p.get("dual_coverage_savings_inr", priya_single_plan_oop - p.get("patient_pays_inr", 600))
+
+    # Dynamic coinsurance label from actual plan data
+    a_primary_pct  = a.get("primary_coinsurance",   "10%").replace(".0%", "%")
+    a_secondary_pct = a.get("secondary_coinsurance", "20%").replace(".0%", "%")
+    p_primary_pct  = p.get("primary_coinsurance",   "20%").replace(".0%", "%")
+    p_secondary_pct = p.get("secondary_coinsurance", "10%").replace(".0%", "%")
+
+    # Aarav primary pays rate = 100% - coinsurance%
+    a_primary_pays_pct = 100 - int(a_primary_pct.replace("%","").replace(".0",""))
+    p_primary_pays_pct = 100 - int(p_primary_pct.replace("%","").replace(".0",""))
+
     text = f"""
 DuCO-AGENT -- YOUR INSURANCE SUMMARY
 Plain Language Briefing for Aarav & Priya Sen
@@ -410,16 +432,17 @@ for your current medical bills. No jargon, just the numbers.
 ----------------------------------------------------------
 AARAV'S KNEE SURGERY (ACL + Meniscectomy)
 ----------------------------------------------------------
-Total surgeon bill          : Rs. {a.get('total_billed_inr',450000):,.0f}
+Total surgeon bill          : Rs. {a.get('total_billed_inr', 450000):,.0f}
 
 Your own policy (Plan B / Insurer2) pays FIRST:
-  Plan B pays               : Rs. {a.get('primary_pays_inr',405000):,.0f}  (90%)
-  Plan A picks up the rest  : Rs. {a.get('secondary_pays_inr',36000):,.0f}
+  Plan B pays               : Rs. {a.get('primary_pays_inr', 405000):,.0f}  ({a_primary_pays_pct}%)
+  Plan A picks up the rest  : Rs. {a.get('secondary_pays_inr', 36000):,.0f}
 
-AARAV, YOU PAY              : Rs. {a.get('patient_pays_inr',9000):,.0f}  ONLY!
+AARAV, YOU PAY              : Rs. {a.get('patient_pays_inr', 9000):,.0f}  ONLY!
 
-Without dual cover you would have paid ~Rs. 90,000.
-With both plans: just Rs. {a.get('patient_pays_inr',9000):,.0f}.
+Without dual cover you would have paid ~Rs. {aarav_single_plan_oop:,.0f}.
+With both plans: just Rs. {a.get('patient_pays_inr', 9000):,.0f}.
+Dual coverage saves you    : Rs. {aarav_savings:,.0f} on this claim!
 
 ACTION REQUIRED:
   Submit aarav_preauth_letter.pdf to Insurer2 (Plan B) NOW.
@@ -428,13 +451,17 @@ ACTION REQUIRED:
 ----------------------------------------------------------
 PRIYA'S PHYSIOTHERAPY BILL
 ----------------------------------------------------------
-Total clinic bill           : Rs. {p.get('total_billed_inr',30000):,.0f}
+Total clinic bill           : Rs. {p.get('total_billed_inr', 30000):,.0f}
 
 Your own policy (Plan A / Insurer1) pays FIRST:
-  Plan A pays               : Rs. {p.get('primary_pays_inr',24000):,.0f}  (80%)
-  Plan B picks up the rest  : Rs. {p.get('secondary_pays_inr',5400):,.0f}
+  Plan A pays               : Rs. {p.get('primary_pays_inr', 24000):,.0f}  ({p_primary_pays_pct}%)
+  Plan B picks up the rest  : Rs. {p.get('secondary_pays_inr', 5400):,.0f}
 
-PRIYA, YOU PAY              : Rs. {p.get('patient_pays_inr',600):,.0f}  ONLY!
+PRIYA, YOU PAY              : Rs. {p.get('patient_pays_inr', 600):,.0f}  ONLY!
+
+Without dual cover you would have paid ~Rs. {priya_single_plan_oop:,.0f}.
+With both plans: just Rs. {p.get('patient_pays_inr', 600):,.0f}.
+Dual coverage saves you    : Rs. {priya_savings:,.0f} on this claim!
 
 ACTION REQUIRED:
   Submit priya_preauth_letter.pdf + original invoice to Insurer1 (Plan A).
@@ -442,10 +469,10 @@ ACTION REQUIRED:
 ----------------------------------------------------------
 FAMILY TOTAL
 ----------------------------------------------------------
-Total medical bills         : Rs. {fam.get('total_billed_inr',480000):,.0f}
-Your family actually pays   : Rs. {fam.get('family_pays_inr',9600):,.0f}
-Money SAVED via dual cover  : Rs. {fam.get('total_savings_inr',470400):,.0f}
-                              ({fam.get('savings_percent',98.0)}% savings!)
+Total medical bills         : Rs. {fam.get('total_billed_inr', 480000):,.0f}
+Your family actually pays   : Rs. {fam.get('family_pays_inr', 9600):,.0f}
+Money SAVED via dual cover  : Rs. {fam.get('total_savings_inr', 470400):,.0f}
+                              ({fam.get('savings_percent', 98.0)}% savings!)
 
 ----------------------------------------------------------
 NEXT STEPS (in order)
