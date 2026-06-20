@@ -11,3 +11,4 @@ build/
 *.log
 data/state.json
 outputs/
+*.mp3
