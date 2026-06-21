@@ -128,7 +128,8 @@ duco-agent-ai-assessment/
     ├── aarav_preauth_letter.pdf
     ├── priya_preauth_letter.pdf
     ├── cost_flow_chart.png
-    └── patient_briefing.txt
+    ├── patient_briefing.txt
+    └── patient_briefing.mp3
 ```
 
 ---
@@ -190,6 +191,8 @@ All tool calls are routed through `call_tool()` dispatcher for logging and audit
 | Charts | matplotlib |
 | Image generation | Pillow |
 | Mock input generation | Pillow + fpdf2 |
+| Audio briefing | pyttsx3 (offline text-to-speech) |
+
 
 ---
 
@@ -202,6 +205,8 @@ All tool calls are routed through `call_tool()` dispatcher for logging and audit
 | `feature/cob-logic` | COB engine + math audit |
 | `feature/multi-modal-outputs` | Pre-auth PDFs + cost flow chart |
 | `feature/agent-architecture` | Insurer API tool + utils + main.py |
+| `feature/audio-briefing` | Offline audio briefing output |
+
 
 All development on feature branches. No direct commits to `main`.
 All merges via Pull Requests with semantic commit messages (`feat:`, `fix:`, `docs:`, `chore:`).
