@@ -17,7 +17,7 @@ DATA_DIR   = Path("data/mock_inputs")
 STATE_PATH = Path("data/state.json")
 
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-3.6-flash"
 
 
 # ─────────────────────────────────────────────────────────────
